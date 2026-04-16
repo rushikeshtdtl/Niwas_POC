@@ -14,29 +14,26 @@ import com.niwas.kyc.util.jwtUtil;
 public class AuthService {
 
     private final UserRepository userRepository;
-    private final jwtUtil wtUtil;
+    private final jwtUtil jwtUtil;
     private final PasswordEncoder passwordEncoder;
 
     public AuthService(UserRepository userRepository,
-                       jwtUtil wtUtil,
-                       PasswordEncoder passwordEncoder) {   
+            jwtUtil jwtUtil,
+            PasswordEncoder passwordEncoder) {
 
         this.userRepository = userRepository;
-        this.wtUtil = wtUtil;
+        this.jwtUtil = jwtUtil;
         this.passwordEncoder = passwordEncoder;
     }
 
     public String register(RegisterRequest request) {
 
-
         User user = new User();
-        if (userRepository.findByPhone(request.mobileno)) {
-            return ResponseEntity
-                    .status(HttpStatus.CONFLICT)          // 409
-                    .body("User already exists with this phone number");
+        if (userRepository.existsByPhone(request.mobileno)) {
+            throw new RuntimeException("User already exists with this phone number");
         }
         user.setName(request.name);
-        //user.setUsername(request.username);
+        // user.setUsername(request.username);
         user.setPhone(request.mobileno);
         user.setEmail(request.email);
         user.setPassword(passwordEncoder.encode(request.password));
@@ -45,7 +42,7 @@ public class AuthService {
 
         userRepository.save(user);
 
-        return wtUtil.generateJwtToken(user.getPhone());
+        return jwtUtil.generateJwtToken(user.getPhone());
     }
 
     public String login(LoginRequest request) {
@@ -58,13 +55,13 @@ public class AuthService {
             throw new RuntimeException("Invalid password");
         }
 
-        return wtUtil.generateJwtToken(user.getPhone());
+        return jwtUtil.generateJwtToken(user.getPhone());
     }
 
     public String checkcomapalinece(LoginRequest request) {
 
-        if(request.mobileno.equals("7000800090") && request.password.equals("comapalinece")) {
-            return wtUtil.generateJwtToken(request.mobileno);
+        if (request.mobileno.equals("7000800090") && request.password.equals("comapalinece")) {
+            return jwtUtil.generateJwtToken(request.mobileno);
         }
         throw new RuntimeException("Invalid Creadentials");
     }
