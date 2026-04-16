@@ -10,6 +10,8 @@ import com.niwas.kyc.model.User;
 import com.niwas.kyc.repository.UserRepository;
 import com.niwas.kyc.util.jwtUtil;
 
+
+
 @Service
 public class AuthService {
 
@@ -30,7 +32,11 @@ public class AuthService {
 
         User user = new User();
         if (userRepository.existsByPhone(request.mobileno)) {
+<<<<<<< HEAD
             throw new RuntimeException("User already exists with this phone number");
+=======
+            return "User already exists with this phone number";
+>>>>>>> 80a358a2e6550a1f7e5eece399905a49cc232cc8
         }
         user.setName(request.name);
         // user.setUsername(request.username);
@@ -42,7 +48,11 @@ public class AuthService {
 
         userRepository.save(user);
 
+<<<<<<< HEAD
         return jwtUtil.generateJwtToken(user.getPhone());
+=======
+        return wtUtil.generateJwtToken(user.getPhone()); 
+>>>>>>> 80a358a2e6550a1f7e5eece399905a49cc232cc8
     }
 
     public String login(LoginRequest request) {

@@ -6,6 +6,7 @@ import com.niwas.kyc.dto.request.*;
 import com.niwas.kyc.service.AuthService;
 import com.niwas.kyc.dto.response.AuthResponse;
 
+
 @RestController
 @RequestMapping("/api/auth")
 @CrossOrigin(origins = "http://192.168.0.132:3000/")
