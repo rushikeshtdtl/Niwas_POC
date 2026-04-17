@@ -1,0 +1,27 @@
+identity_weight: 0.6
+fraud_weight: 0.4
+
+thresholds:
+  approve: 75
+  review: 50
+  name_mismatch: 70
+  name_severe_mismatch: 50
+  address_mismatch: 75
+  address_review_floor: 50
+  address_severe_mismatch: 50
+  signature_mismatch: 0.6
+  signature_severe_mismatch: 0.4
+
+penalties:
+  name_mismatch_minor: 15
+  name_mismatch_major: 30
+  dob_mismatch: 40
+  address_mismatch_minor: 15
+  address_mismatch_major: 30
+  address_data_incomplete: 10
+  signature_mismatch_minor: 25
+  signature_mismatch_major: 50
+  invalid_field_per_document: 20
+  invalid_field_cap: 50
+  document_forensics_review: 20
+  document_tampering_suspected: 40
