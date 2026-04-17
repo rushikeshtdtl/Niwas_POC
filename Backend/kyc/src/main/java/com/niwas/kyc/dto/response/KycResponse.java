@@ -1,15 +1,30 @@
 package com.niwas.kyc.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 public class KycResponse {
 
     private String message;
     private String kycId;
     private String status;
 
+    @JsonProperty("kyc_scores")
+    private OcrResponseDTO.KycScores kycScores;
+
+    public KycResponse() {
+    }
+
     public KycResponse(String message, String kycId, String status) {
         this.message = message;
         this.kycId = kycId;
         this.status = status;
+    }
+
+    public KycResponse(String message, String kycId, String status, OcrResponseDTO.KycScores kycScores) {
+        this.message = message;
+        this.kycId = kycId;
+        this.status = status;
+        this.kycScores = kycScores;
     }
 
     // Getters and Setters
@@ -35,5 +50,13 @@ public class KycResponse {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public OcrResponseDTO.KycScores getKycScores() {
+        return kycScores;
+    }
+
+    public void setKycScores(OcrResponseDTO.KycScores kycScores) {
+        this.kycScores = kycScores;
     }
 }

@@ -6,6 +6,8 @@ import com.niwas.kyc.entity.KycDocument;
 import com.niwas.kyc.repository.KycRepository;
 import com.niwas.kyc.repository.UserRepository;
 import com.niwas.kyc.model.User;
+import com.niwas.kyc.client.OcrClient;
+import com.niwas.kyc.dto.response.OcrResponseDTO;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.Authentication;
 
@@ -30,15 +32,17 @@ public class KycService {
 
     private final KycRepository kycRepository;
     private final UserRepository userRepository;
+    private final OcrClient ocrClient;
 
     private static final String UPLOAD_DIR = "uploads/kyc/";
 
-    public KycService(KycRepository kycRepository, UserRepository userRepository) {
+    public KycService(KycRepository kycRepository, UserRepository userRepository, OcrClient ocrClient) {
         this.kycRepository = kycRepository;
         this.userRepository = userRepository;
+        this.ocrClient = ocrClient;
     }
 
-    public KycDocument uploadKyc(MultipartFile aadhaarFile, MultipartFile panFile, MultipartFile bankStatement,
+    public OcrResponseDTO uploadKyc(MultipartFile aadhaarFile, MultipartFile panFile, MultipartFile bankStatement,
             MultipartFile signature) throws IOException {
         // Get authenticated user
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
@@ -81,7 +85,21 @@ public class KycService {
         kyc.setBankStatement(bankPath);
         kyc.setSignature(signaturePath);
 
-        return kycRepository.save(kyc);
+        KycDocument savedKyc = kycRepository.save(kyc);
+
+        // Call OCR service synchronously (blocking) to get response before returning
+        System.out.println("\n=== CALLING OCR SERVICE ===");
+        System.out.println("KYC ID: " + kycId);
+        OcrResponseDTO ocrResponse = ocrClient.processKycWithOcr(kycId, user.getUserId(), aadhaarPath, panPath,
+                bankPath, signaturePath);
+        System.out.println("=== OCR CALL COMPLETED ===");
+
+        if (ocrResponse != null && ocrResponse.getKycStatus() != null) {
+            savedKyc.setStatus(ocrResponse.getKycStatus());
+            kycRepository.save(savedKyc);
+        }
+
+        return ocrResponse;
     }
 
     private void validateFile(MultipartFile file, List<String> allowedExtensions) throws IOException {
