@@ -42,7 +42,7 @@ public class AuthService {
 
         userRepository.save(user);
 
-        return jwtUtil.generateJwtToken(user.getPhone());
+        return jwtUtil.generateJwtToken(user.getPhone(), user.getName());
     }
 
     public String login(LoginRequest request) {
@@ -55,13 +55,13 @@ public class AuthService {
             throw new RuntimeException("Invalid password");
         }
 
-        return jwtUtil.generateJwtToken(user.getPhone());
+        return jwtUtil.generateJwtToken(user.getPhone(), request.name);
     }
 
     public String checkcomapalinece(LoginRequest request) {
 
         if (request.mobileno.equals("7000800090") && request.password.equals("comapalinece")) {
-            return jwtUtil.generateJwtToken(request.mobileno);
+            return jwtUtil.generateJwtToken(request.mobileno, request.name != null ? request.name : "System");
         }
         throw new RuntimeException("Invalid Creadentials");
     }

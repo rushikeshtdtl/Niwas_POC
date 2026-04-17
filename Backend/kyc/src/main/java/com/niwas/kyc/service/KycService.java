@@ -8,6 +8,9 @@ import com.niwas.kyc.repository.UserRepository;
 import com.niwas.kyc.model.User;
 import com.niwas.kyc.client.OcrClient;
 import com.niwas.kyc.dto.response.OcrResponseDTO;
+import com.niwas.kyc.util.FuzzyMatcher;
+import com.niwas.kyc.repository.KycDataRepository;
+import com.niwas.kyc.entity.KycData;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.Authentication;
 
@@ -32,22 +35,44 @@ public class KycService {
 
     private final KycRepository kycRepository;
     private final UserRepository userRepository;
+    private final KycDataRepository kycDataRepository;
     private final OcrClient ocrClient;
+    private final FuzzyMatcher fuzzyMatcher;
 
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(KycService.class);
     private static final String UPLOAD_DIR = "uploads/kyc/";
 
-    public KycService(KycRepository kycRepository, UserRepository userRepository, OcrClient ocrClient) {
+    public KycService(KycRepository kycRepository, UserRepository userRepository, 
+            KycDataRepository kycDataRepository, OcrClient ocrClient, FuzzyMatcher fuzzyMatcher) {
         this.kycRepository = kycRepository;
         this.userRepository = userRepository;
+        this.kycDataRepository = kycDataRepository;
         this.ocrClient = ocrClient;
+        this.fuzzyMatcher = fuzzyMatcher;
     }
 
     public OcrResponseDTO uploadKyc(MultipartFile aadhaarFile, MultipartFile panFile, MultipartFile bankStatement,
             MultipartFile signature) throws IOException {
+        logger.info("=== KycService: uploadKyc method entered ===");
+        
         // Get authenticated user
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        String mobile = (String) auth.getPrincipal();
-        User user = userRepository.findByPhone(mobile).orElseThrow(() -> new RuntimeException("User not found"));
+        if (auth == null) {
+            logger.error("Authentication object is null in SecurityContext");
+            throw new RuntimeException("Authentication not found!");
+        }
+        
+        String mobile = auth.getPrincipal().toString();
+        String loginName = (auth.getDetails() != null) ? auth.getDetails().toString() : null;
+        
+        logger.info("Service process for mobile: {}", mobile);
+        logger.info("Session Login Name: {}", loginName);
+        
+        User user = userRepository.findByPhone(mobile).orElseThrow(() -> {
+            logger.error("User not found in DB for phone: {}", mobile);
+            return new RuntimeException("User not found for mobile: " + mobile);
+        });
+        logger.info("Database User match: {}", user.getName());
 
         // Validate files presence
         if (aadhaarFile.isEmpty() || panFile.isEmpty() || bankStatement.isEmpty() || signature.isEmpty()) {
@@ -61,10 +86,11 @@ public class KycService {
         validateFile(signature, Arrays.asList("jpg", "jpeg", "png", "pdf"));
 
         // Generate unique kyc_id
-        String kycId;
+        String generatedKycId;
         do {
-            kycId = "KYC" + java.time.Year.now().getValue() + generateRandomString(6);
-        } while (kycRepository.existsByKycId(kycId));
+            generatedKycId = "KYC" + java.time.Year.now().getValue() + generateRandomString(6);
+        } while (kycRepository.existsByKycId(generatedKycId));
+        final String kycId = generatedKycId;
 
         // Create directory
         Path kycDir = Paths.get(UPLOAD_DIR + kycId);
@@ -95,8 +121,41 @@ public class KycService {
         System.out.println("=== OCR CALL COMPLETED ===");
 
         if (ocrResponse != null && ocrResponse.getKycStatus() != null) {
+            System.out.println("Processing OCR response. Status: " + ocrResponse.getKycStatus());
             savedKyc.setStatus(ocrResponse.getKycStatus());
+            
+            // loginName is already extracted at the beginning
+            System.out.println("KycService: Starting Name Matching process...");
+            
+            KycData kycData = kycDataRepository.findByKycId(kycId)
+                    .orElseThrow(() -> {
+                        System.err.println("KycService ERROR: KycData NOT FOUND for ID: " + kycId);
+                        return new RuntimeException("KYC data not found in DB after OCR processing for ID: " + kycId);
+                    });
+
+            System.out.println("Retrieved extracted names from DB - Aadhaar: " + kycData.getAadhaarName() + ", PAN: " + kycData.getPanName());
+
+            double aadhaarMatch = fuzzyMatcher.calculateSimilarity(loginName, kycData.getAadhaarName());
+            double panMatch = fuzzyMatcher.calculateSimilarity(loginName, kycData.getPanName());
+
+            System.out.println("=== Name Matching Results ===");
+            System.out.println("Login Name: " + loginName);
+            System.out.println("Aadhaar Name: " + kycData.getAadhaarName() + " (Score: " + String.format("%.2f", aadhaarMatch) + "%)");
+            System.out.println("PAN Name: " + kycData.getPanName() + " (Score: " + String.format("%.2f", panMatch) + "%)");
+
+            if (aadhaarMatch < 70.0 || panMatch < 70.0) {
+                System.out.println("KYC FAILED due to name mismatch (Threshold: 70%)");
+                savedKyc.setStatus("FAILED");
+                kycRepository.save(savedKyc);
+                throw new RuntimeException("KYC Failed: Name mismatch detected. " +
+                        "(Aadhaar: " + String.format("%.1f", aadhaarMatch) + "%, " +
+                        "PAN: " + String.format("%.1f", panMatch) + "%)");
+            }
+
+            System.out.println("KYC MATCH SUCCESSFUL. Finalizing report...");
             kycRepository.save(savedKyc);
+        } else {
+            System.out.println("WARNING: OCR Response is null or missing status!");
         }
 
         return ocrResponse;
@@ -107,9 +166,13 @@ public class KycService {
         if (filename == null)
             throw new RuntimeException("Invalid file");
 
-        String extension = filename.substring(filename.lastIndexOf('.') + 1).toLowerCase();
+        int lastDotIndex = filename.lastIndexOf('.');
+        if (lastDotIndex == -1) {
+            throw new RuntimeException("File has no extension: " + filename);
+        }
+        String extension = filename.substring(lastDotIndex + 1).toLowerCase();
         if (!allowedExtensions.contains(extension)) {
-            throw new RuntimeException("Invalid file type");
+            throw new RuntimeException("Invalid file type: " + extension + ". Allowed: " + allowedExtensions);
         }
 
         // Try to read the file
@@ -134,7 +197,8 @@ public class KycService {
 
     private String saveFile(MultipartFile file, Path dir, String prefix) throws IOException {
         String filename = file.getOriginalFilename();
-        String extension = filename.substring(filename.lastIndexOf('.'));
+        int lastDotIndex = filename.lastIndexOf('.');
+        String extension = (lastDotIndex != -1) ? filename.substring(lastDotIndex) : ".bin";
         String newFilename = prefix + extension;
         Path filePath = dir.resolve(newFilename);
         Files.copy(file.getInputStream(), filePath);

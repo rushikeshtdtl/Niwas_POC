@@ -22,6 +22,8 @@ public class JwtAuthFilter extends OncePerRequestFilter {
  
     @Autowired
     private jwtUtil jwtUtil;
+
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(JwtAuthFilter.class);
  
     @Override
     protected void doFilterInternal(
@@ -37,27 +39,31 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         }
  
         String header = request.getHeader("Authorization");
- 
         if (header != null && header.startsWith("Bearer ")) {
- 
             String token = header.substring(7);
- 
+            logger.info("JwtAuthFilter: Processing token...");
+
             boolean valid = jwtUtil.validateJwtToken(token);
- 
             if (!valid) {
+                logger.warn("JwtAuthFilter: Invalid token!");
                 response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                 response.getWriter().write("Invalid JWT Token");
                 return;
             }
- 
+
             String mobile = jwtUtil.getUserNameFromJwtToken(token);
- 
+            String name = jwtUtil.getNameFromJwtToken(token);
+            logger.info("JwtAuthFilter: Authenticated Mobile: {}, Name: {}", mobile, name);
+
             UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
                     mobile,
                     null,
-                    Collections.emptyList());
- 
+                    java.util.Collections.emptyList());
+            
+            auth.setDetails(name);
+
             SecurityContextHolder.getContext().setAuthentication(auth);
+            logger.info("JwtAuthFilter: SecurityContext updated");
         }
  
         filterChain.doFilter(request, response);

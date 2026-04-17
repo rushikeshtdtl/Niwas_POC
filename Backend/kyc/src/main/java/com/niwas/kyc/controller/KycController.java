@@ -37,10 +37,20 @@ public class KycController {
             @RequestPart("bank_statement") MultipartFile bankStatement,
             @RequestPart("signature") MultipartFile signature) throws IOException {
 
-        OcrResponseDTO ocrResponse = kycService.uploadKyc(aadhaarFile, panFile, bankStatement, signature);
+        try {
+            OcrResponseDTO ocrResponse = kycService.uploadKyc(aadhaarFile, panFile, bankStatement, signature);
+            
+            if (ocrResponse == null) {
+                throw new RuntimeException("OCR service currently unavailable. Please ensure the OCR microservice is running or enable Mock Mode.");
+            }
 
-        return new KycResponse("KYC uploaded successfully", ocrResponse.getKycId(), ocrResponse.getKycStatus(),
-                ocrResponse.getKycScores());
+            return new KycResponse("KYC uploaded successfully", ocrResponse.getKycId(), ocrResponse.getKycStatus(),
+                    ocrResponse.getKycScores());
+        } catch (Exception e) {
+            System.err.println("=== ERROR IN KYC UPLOAD ===");
+            e.printStackTrace();
+            throw e;
+        }
     }
 
     @GetMapping("/data")
