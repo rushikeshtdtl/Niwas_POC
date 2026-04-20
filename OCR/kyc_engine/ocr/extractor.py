@@ -21,6 +21,7 @@ from kyc_engine.config import get_settings
 from kyc_engine.core.file_validator import FilePayload
 from kyc_engine.models.schema import AuditEntry, OCRBundle, OCRLog
 from kyc_engine.ocr.parser import OCRParser
+from kyc_engine.utils.similarity import name_similarity
 
 
 def build_ocr_log(diagnostics: list[dict[str, str | bool]]) -> OCRLog:
@@ -188,6 +189,68 @@ class OCRExtractor:
         )
         return OCRBundle.model_validate(extracted), ocr_log
 
+    def refine_statement_holder_name(
+        self,
+        statement_payload: FilePayload,
+        current_statement_name: str,
+        holder_names: list[str],
+        audit_trail: list[AuditEntry],
+    ) -> str:
+        normalized_holders = [name.strip().upper() for name in holder_names if name.strip()]
+        if not normalized_holders:
+            return current_statement_name
+
+        current_name = current_statement_name.strip().upper()
+        current_score = self._best_holder_name_score(current_name, normalized_holders)
+        if current_name and current_score >= 85:
+            return current_statement_name
+
+        candidate_names = self._statement_name_candidates_from_tesseract(
+            statement_payload
+        )
+        best_local = self._pick_best_holder_aligned_name(
+            candidate_names,
+            normalized_holders,
+        )
+        if best_local and self._best_holder_name_score(best_local, normalized_holders) > current_score:
+            audit_trail.append(
+                AuditEntry(
+                    level="INFO",
+                    stage="OCR",
+                    message=(
+                        "statement: holder-aware local refinement improved statement_name "
+                        f"from '{current_statement_name}' to '{best_local}'"
+                    ),
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                )
+            )
+            return best_local
+
+        settings = get_settings()
+        if not settings.groq_configured:
+            return current_statement_name
+
+        ai_candidate = self._extract_statement_name_with_holder_context(
+            statement_payload,
+            normalized_holders,
+            settings,
+        )
+        if ai_candidate and self._best_holder_name_score(ai_candidate, normalized_holders) > current_score:
+            audit_trail.append(
+                AuditEntry(
+                    level="INFO",
+                    stage="OCR",
+                    message=(
+                        "statement: holder-aware AI refinement improved statement_name "
+                        f"from '{current_statement_name}' to '{ai_candidate}'"
+                    ),
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                )
+            )
+            return ai_candidate
+
+        return current_statement_name
+
     def _extract_document(
         self,
         document_type: str,
@@ -329,46 +392,6 @@ class OCRExtractor:
             return parsed
 
         parsed = self._semantic_merge_candidates(document_type, candidates)
-        missing_focus_fields = self._missing_focus_fields(document_type, parsed)
-        if document_type == "pan" and missing_focus_fields:
-            pan_focus_candidates = self._extract_pan_focus_candidates(
-                file_payload,
-                settings,
-                diagnostics,
-                audit_trail,
-                missing_focus_fields,
-            )
-            if pan_focus_candidates:
-                parsed = self._semantic_merge_candidates(
-                    document_type,
-                    [parsed, *pan_focus_candidates],
-                )
-        if document_type == "aadhaar" and missing_focus_fields:
-            aadhaar_focus_candidates = self._extract_aadhaar_focus_candidates(
-                file_payload,
-                settings,
-                diagnostics,
-                audit_trail,
-                missing_focus_fields,
-            )
-            if aadhaar_focus_candidates:
-                parsed = self._semantic_merge_candidates(
-                    document_type,
-                    [parsed, *aadhaar_focus_candidates],
-                )
-        if document_type == "statement" and missing_focus_fields:
-            statement_focus_candidates = self._extract_statement_customer_candidates(
-                file_payload,
-                settings,
-                diagnostics,
-                audit_trail,
-                missing_focus_fields,
-            )
-            if statement_focus_candidates:
-                parsed = self._semantic_merge_candidates(
-                    document_type,
-                    [parsed, *statement_focus_candidates],
-                )
         parsed = self._recover_missing_fields_with_focus_pass(
             document_type,
             parsed,
@@ -581,14 +604,11 @@ class OCRExtractor:
         audit_trail: list[AuditEntry],
         diagnostics: list[dict[str, str | bool]],
     ) -> dict:
-        focus_fields = self.FOCUS_FIELDS.get(document_type, [])
-        missing_fields = [
-            field for field in focus_fields if not str(parsed.get(field, "")).strip()
-        ]
+        missing_fields = self._missing_focus_fields(document_type, parsed)
         if not missing_fields:
             return parsed
 
-        focus_candidates: list[dict] = []
+        merged = parsed.copy()
         if settings.tesseract_available and pytesseract is not None:
             tesseract_focused = self._extract_focus_with_tesseract(
                 document_type,
@@ -596,8 +616,11 @@ class OCRExtractor:
                 file_payload,
                 settings,
             )
-            if any(str(tesseract_focused.get(field, "")).strip() for field in missing_fields):
-                focus_candidates.append(tesseract_focused)
+            if any(
+                str(tesseract_focused.get(field, "")).strip()
+                for field in missing_fields
+            ):
+                merged = self._merge_missing_fields(merged, tesseract_focused)
                 diagnostics.append(
                     {
                         "document": document_type,
@@ -606,6 +629,37 @@ class OCRExtractor:
                         "failure": "",
                     }
                 )
+                recovered_local = [
+                    field
+                    for field in missing_fields
+                    if str(merged.get(field, "")).strip()
+                ]
+                if recovered_local:
+                    audit_trail.append(
+                        AuditEntry(
+                            level="INFO",
+                            stage="OCR",
+                            message=(
+                                f"{document_type}: local focused OCR recovered fields "
+                                f"{recovered_local}"
+                            ),
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                        )
+                    )
+            else:
+                diagnostics.append(
+                    {
+                        "document": document_type,
+                        "source": "tesseract-focus",
+                        "success": False,
+                        "failure": "tesseract focus returned empty fields",
+                    }
+                )
+
+        missing_fields = self._missing_focus_fields(document_type, merged)
+        if not missing_fields:
+            return merged
+
         focus_attempts = [
             (
                 "groq-focus",
@@ -630,7 +684,6 @@ class OCRExtractor:
                     fields=missing_fields,
                     file_payload=file_payload,
                 )
-                focus_candidates.append(focused)
                 diagnostics.append(
                     {
                         "document": document_type,
@@ -639,6 +692,25 @@ class OCRExtractor:
                         "failure": "",
                     }
                 )
+                merged = self._merge_missing_fields(merged, focused)
+                recovered_remote = [
+                    field
+                    for field in missing_fields
+                    if str(merged.get(field, "")).strip()
+                ]
+                if recovered_remote:
+                    audit_trail.append(
+                        AuditEntry(
+                            level="INFO",
+                            stage="OCR",
+                            message=(
+                                f"{document_type}: final AI recovery filled fields "
+                                f"{recovered_remote}"
+                            ),
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                        )
+                    )
+                    break
             except Exception as exc:
                 diagnostics.append(
                     {
@@ -657,23 +729,6 @@ class OCRExtractor:
                     )
                 )
 
-        if not focus_candidates:
-            return parsed
-
-        focused = self._semantic_merge_candidates(document_type, focus_candidates)
-        merged = self._merge_missing_fields(parsed, focused)
-        recovered = [
-            field for field in missing_fields if str(merged.get(field, "")).strip()
-        ]
-        if recovered:
-            audit_trail.append(
-                AuditEntry(
-                    level="INFO",
-                    stage="OCR",
-                    message=f"{document_type}: focused OCR recovered fields {recovered}",
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                )
-            )
         return merged
 
     def _extract_focus_with_provider(
@@ -844,6 +899,107 @@ class OCRExtractor:
 
         merged = self._semantic_merge_candidates(document_type, candidates)
         return {field: str(merged.get(field, "")).strip() for field in fields}
+
+    def _statement_name_candidates_from_tesseract(
+        self,
+        statement_payload: FilePayload,
+    ) -> list[str]:
+        settings = get_settings()
+        if not settings.tesseract_available or pytesseract is None:
+            return []
+
+        if statement_payload.extension == ".pdf":
+            crop_map = self._render_statement_customer_crops(statement_payload.data)
+        else:
+            crop_map = {
+                "statement-full": self._document_image_bytes_for_ocr(
+                    statement_payload, "statement"
+                )
+            }
+
+        candidates: list[str] = []
+        for crop_bytes in crop_map.values():
+            text = self._extract_text_from_image_bytes_with_tesseract(
+                crop_bytes,
+                "statement",
+                settings,
+            )
+            if not text:
+                continue
+            name = self.parser.parse_text("statement", text).get("statement_name", "").strip()
+            if name:
+                candidates.append(name.upper())
+        return candidates
+
+    def _extract_statement_name_with_holder_context(
+        self,
+        statement_payload: FilePayload,
+        holder_names: list[str],
+        settings,
+    ) -> str:
+        holder_hint = ", ".join(holder_names)
+        prompt = (
+            "Extract only the bank statement account-holder/customer name as JSON using this schema: "
+            '{"statement_name":""}. '
+            "Do not return father name, nominee name, address text, branch name, or bank name. "
+            f"The correct holder name should closely match one of these known KYC holder names: {holder_hint}."
+        )
+        content: list[dict] = [{"type": "text", "text": prompt}]
+        image_data_uri = self._to_image_data_uri(statement_payload, "statement")
+        if image_data_uri:
+            content.append({"type": "image_url", "image_url": {"url": image_data_uri}})
+        if statement_payload.extension == ".pdf":
+            content.append(
+                {
+                    "type": "text",
+                    "text": f"Document text:\n{self._extract_pdf_text(statement_payload.data)}",
+                }
+            )
+
+        response = requests.post(
+            self.GROQ_ENDPOINT,
+            headers={
+                "Authorization": f"Bearer {settings.groq_api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": settings.groq_vision_model,
+                "temperature": 0,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are an OCR transcriber. Extract only the requested visible field into valid JSON.",
+                    },
+                    {"role": "user", "content": content},
+                ],
+                "response_format": {"type": "json_object"},
+            },
+            timeout=60,
+        )
+        response.raise_for_status()
+        raw = response.json()["choices"][0]["message"]["content"]
+        parsed = self.parser.parse_partial({"statement_name": ""}, raw)
+        return str(parsed.get("statement_name", "")).strip().upper()
+
+    @staticmethod
+    def _best_holder_name_score(candidate: str, holder_names: list[str]) -> float:
+        if not candidate.strip():
+            return 0.0
+        return max((name_similarity(candidate, holder) for holder in holder_names), default=0.0)
+
+    def _pick_best_holder_aligned_name(
+        self,
+        candidates: list[str],
+        holder_names: list[str],
+    ) -> str:
+        best_candidate = ""
+        best_score = 0.0
+        for candidate in candidates:
+            score = self._best_holder_name_score(candidate, holder_names)
+            if score > best_score:
+                best_candidate = candidate
+                best_score = score
+        return best_candidate if best_score >= 70 else ""
 
     def _semantic_merge_candidates(
         self, document_type: str, candidates: list[dict]

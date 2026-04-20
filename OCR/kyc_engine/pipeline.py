@@ -44,6 +44,16 @@ class KYCPipeline:
         ocr_data, ocr_log = await self.ocr_extractor.extract(
             validated_files, audit_trail
         )
+        holder_names = [
+            ocr_data.pan_details.pan_name,
+            ocr_data.aadhaar_details.aadhaar_name,
+        ]
+        ocr_data.statement_details.statement_name = self.ocr_extractor.refine_statement_holder_name(
+            validated_files["bank_statement"],
+            ocr_data.statement_details.statement_name,
+            holder_names,
+            audit_trail,
+        )
         self._record_ocr_completeness(ocr_data.model_dump(), ocr_log, audit_trail)
         normalized = self.normalizer.normalize(ocr_data, audit_trail)
         validation = self.validator.validate(normalized, audit_trail)

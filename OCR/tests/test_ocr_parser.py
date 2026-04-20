@@ -152,3 +152,63 @@ def test_statement_text_extraction_recovers_customer_name_without_name_label() -
     result = parser.parse_text("statement", text)
 
     assert result["statement_name"] == "MR ADITYA GORAKSHNATH PATARE"
+
+
+def test_priority_recovery_uses_local_before_final_ai(monkeypatch) -> None:
+    extractor = OCRExtractor()
+    audit_trail = []
+    diagnostics = []
+
+    class Settings:
+        tesseract_available = True
+        groq_configured = True
+        groq_api_key = "x"
+        groq_vision_model = "model"
+
+    called = {"remote": 0}
+
+    monkeypatch.setattr(
+        extractor,
+        "_extract_focus_with_tesseract",
+        lambda document_type, fields, file_payload, settings: {"statement_name": "MR TEST USER"},
+    )
+
+    def fail_if_called(*args, **kwargs):
+        called["remote"] += 1
+        raise AssertionError("Remote recovery should not be called after local recovery")
+
+    monkeypatch.setattr(extractor, "_extract_focus_with_provider", fail_if_called)
+
+    merged = extractor._recover_missing_fields_with_focus_pass(
+        "statement",
+        {
+            "statement_name": "",
+            "statement_account_number": "1234567890",
+            "statement_ifsc_code": "HDFC0001234",
+            "statement_address": "mumbai india",
+        },
+        file_payload=None,
+        settings=Settings(),
+        audit_trail=audit_trail,
+        diagnostics=diagnostics,
+    )
+
+    assert merged["statement_name"] == "MR TEST USER"
+    assert called["remote"] == 0
+
+
+def test_holder_aligned_name_picker_prefers_real_customer_name() -> None:
+    extractor = OCRExtractor()
+
+    best = extractor._pick_best_holder_aligned_name(
+        [
+            "RAMCHANDR GORAKSHPATARES",
+            "SHIVRAJ GORAKSHNATH PATARE",
+        ],
+        [
+            "SHIVRAJ GORAKSHNATH PATARE",
+            "SHIVRAJ GORAKSHNATH PATARE",
+        ],
+    )
+
+    assert best == "SHIVRAJ GORAKSHNATH PATARE"
