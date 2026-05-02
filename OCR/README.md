@@ -7,8 +7,10 @@ The OCR module is a Zero-Trust Deterministic KYC Validation Engine designed to p
 - **Document Extraction**: Automated extraction of data from PAN and Aadhaar cards.
 - **Verification**: Deterministic rule-based matching and validation of extracted data.
 - **Forensics**: Integrated forensic checks and fraud scoring.
-- **Hybrid OCR**: Utilizes Groq (AI-powered) when an API key is provided, with local fallback options.
+- **Hybrid OCR**: Utilizes Gemini 1.5 Pro (AI-powered) when an API key is provided, with local fallback options.
 - **Audit Trail**: Every request generates a detailed JSON audit record for compliance and debugging.
+- **Partial Validation**: Returns extracted fields plus validation warnings instead of hard-failing for incomplete documents.
+- **Aadhaar Intelligence**: Detects front-side-only Aadhaar images and guides users to upload complete documents.
 
 ## Setup Instructions
 
@@ -24,7 +26,8 @@ The OCR module is a Zero-Trust Deterministic KYC Validation Engine designed to p
 3.  **Environment Configuration**:
     - Copy `.env.example` to `.env`
     - Configure the following variables:
-        - `GROQ_API_KEY` (Optional: for AI-enhanced OCR)
+        - `GEMINI_API_KEY` (Required: for AI-enhanced OCR)
+        - `GEMINI_VISION_MODEL` (Defaults to `gemini-1.5-pro`)
         - `TESSERACT_CMD` (Optional: path to tesseract executable if not in PATH)
 
 ## Running the OCR Service

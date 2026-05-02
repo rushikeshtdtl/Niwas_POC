@@ -8,6 +8,7 @@ import fitz
 import numpy as np
 from PIL import Image
 
+from kyc_engine.config import get_rules
 from kyc_engine.core.file_validator import FilePayload
 from kyc_engine.models.schema import (
     AuditEntry,
@@ -23,20 +24,6 @@ class ImageForensicsEngine:
         "aadhaar_file": "aadhaar",
         "bank_statement": "statement",
     }
-    EXPECTED_PROFILE = {
-        "pan": {"components": (20, 250), "text_lines": (3, 12), "density": (0.01, 0.20)},
-        "aadhaar": {"components": (25, 400), "text_lines": (4, 18), "density": (0.02, 0.24)},
-        "statement": {"components": (80, 2500), "text_lines": (10, 120), "density": (0.03, 0.35)},
-    }
-    EDITOR_MARKERS = (
-        "adobe",
-        "photoshop",
-        "gimp",
-        "canva",
-        "snapseed",
-        "lightroom",
-        "illustrator",
-    )
 
     def analyze(
         self,
@@ -138,7 +125,9 @@ class ImageForensicsEngine:
         return image, " ".join(metadata_parts).lower()
 
     def _metadata_audit(self, metadata_text: str) -> ForensicLayerResult:
-        hits = [marker for marker in self.EDITOR_MARKERS if marker in metadata_text]
+        rules = get_rules()
+        markers = rules.forensics["editor_markers"]
+        hits = [marker for marker in markers if marker in metadata_text]
         suspicious = bool(hits)
         return ForensicLayerResult(
             layer_name="metadata_audit",
@@ -203,8 +192,9 @@ class ImageForensicsEngine:
         )
 
     def _template_profile_check(self, document_type: str, image: Image.Image) -> ForensicLayerResult:
+        rules = get_rules()
         components, text_lines, density = self._layout_metrics(image)
-        expected = self.EXPECTED_PROFILE[document_type]
+        expected = rules.forensics["expected_profiles"][document_type]
         suspicious = not (
             expected["components"][0] <= components <= expected["components"][1]
             and expected["text_lines"][0] <= text_lines <= expected["text_lines"][1]
@@ -218,8 +208,9 @@ class ImageForensicsEngine:
         )
 
     def _text_density_check(self, document_type: str, image: Image.Image) -> ForensicLayerResult:
+        rules = get_rules()
         _, _, density = self._layout_metrics(image)
-        expected = self.EXPECTED_PROFILE[document_type]["density"]
+        expected = rules.forensics["expected_profiles"][document_type]["density"]
         suspicious = not (expected[0] <= density <= expected[1])
         distance = min(abs(density - expected[0]), abs(density - expected[1])) if suspicious else 0.0
         score = min(15.0, round(distance * 100, 2)) if suspicious else 0.0

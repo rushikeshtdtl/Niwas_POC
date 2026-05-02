@@ -40,10 +40,12 @@ class KYCPipeline:
         request_id = str(uuid4())
 
         validated_files = await self.file_validator.validate(files, audit_trail)
-        forensics = self.forensics.analyze(validated_files, audit_trail)
-        ocr_data, ocr_log = await self.ocr_extractor.extract(
-            validated_files, audit_trail
-        )
+        
+        import asyncio
+        forensics_task = asyncio.to_thread(self.forensics.analyze, validated_files, audit_trail)
+        ocr_task = self.ocr_extractor.extract(validated_files, audit_trail)
+        
+        forensics, (ocr_data, ocr_log) = await asyncio.gather(forensics_task, ocr_task)
         holder_names = [
             ocr_data.pan_details.pan_name,
             ocr_data.aadhaar_details.aadhaar_name,

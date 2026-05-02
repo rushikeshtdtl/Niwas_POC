@@ -1,4 +1,5 @@
 from kyc_engine.ocr.extractor import OCRExtractor
+from kyc_engine.ocr.merger import SemanticMerger
 from kyc_engine.ocr.parser import OCRParser
 
 
@@ -26,7 +27,7 @@ def test_merge_missing_fields_only_fills_blanks() -> None:
         "statement_address": "Nashik Road",
     }
 
-    merged = OCRExtractor._merge_missing_fields(primary, recovered)
+    merged = SemanticMerger.merge_missing_fields(primary, recovered)
 
     assert merged["statement_name"] == "MR SHIVRAJ PATARE"
     assert merged["statement_account_number"] == "50100683865085"
@@ -36,7 +37,7 @@ def test_merge_missing_fields_only_fills_blanks() -> None:
 
 def test_semantic_merge_prefers_richer_address_and_name_values() -> None:
     extractor = OCRExtractor()
-    merged = extractor._semantic_merge_candidates(
+    merged = extractor.merger.merge_candidates(
         "statement",
         [
             {
@@ -60,7 +61,7 @@ def test_semantic_merge_prefers_richer_address_and_name_values() -> None:
 
 def test_statement_customer_focus_beats_bank_like_address() -> None:
     extractor = OCRExtractor()
-    merged = extractor._semantic_merge_candidates(
+    merged = extractor.merger.merge_candidates(
         "statement",
         [
             {
@@ -68,14 +69,14 @@ def test_statement_customer_focus_beats_bank_like_address() -> None:
                 "statement_account_number": "50100683865085",
                 "statement_ifsc_code": "HDFC0000456",
                 "statement_address": "HDFC Bank Ltd Branch Office Nashik Road IFSC HDFC0000456",
-                "_source": "groq",
+                "_source": "gemini",
             },
             {
                 "statement_name": "MR SHIVRAJ GORAKSHNATH PATARE",
                 "statement_account_number": "50100683865085",
                 "statement_ifsc_code": "HDFC0000456",
                 "statement_address": "Flat 3 Mithila Apartments Bytco Point Nashik Road 422101",
-                "_source": "groq-statement-customer-focus:customer-focus-top-left",
+                "_source": "gemini-statement-customer-focus:customer-focus-top-left",
             },
         ],
     )
@@ -161,9 +162,9 @@ def test_priority_recovery_uses_local_before_final_ai(monkeypatch) -> None:
 
     class Settings:
         tesseract_available = True
-        groq_configured = True
-        groq_api_key = "x"
-        groq_vision_model = "model"
+        gemini_configured = True
+        gemini_api_key = "x"
+        gemini_vision_model = "model"
 
     called = {"remote": 0}
 
@@ -200,7 +201,7 @@ def test_priority_recovery_uses_local_before_final_ai(monkeypatch) -> None:
 def test_holder_aligned_name_picker_prefers_real_customer_name() -> None:
     extractor = OCRExtractor()
 
-    best = extractor._pick_best_holder_aligned_name(
+    best = extractor.merger.pick_best_holder_aligned_name(
         [
             "RAMCHANDR GORAKSHPATARES",
             "SHIVRAJ GORAKSHNATH PATARE",

@@ -25,3 +25,43 @@ penalties:
   invalid_field_cap: 50
   document_forensics_review: 20
   document_tampering_suspected: 40
+
+forensics:
+  editor_markers:
+    - adobe
+    - photoshop
+    - gimp
+    - canva
+    - snapseed
+    - lightroom
+    - illustrator
+  expected_profiles:
+    pan:
+      components: [20, 250]
+      text_lines: [3, 12]
+      density: [0.01, 0.20]
+    aadhaar:
+      components: [25, 400]
+      text_lines: [4, 18]
+      density: [0.02, 0.24]
+    statement:
+      components: [80, 2500]
+      text_lines: [10, 120]
+      density: [0.03, 0.35]
+
+ocr:
+  statement_bank_markers:
+    - bank
+    - branch
+    - customer care
+    - customercare
+    - help line
+    - helpline
+    - ifsc
+    - micr
+    - email
+    - phone
+    - fax
+    - www.
+    - ltd
+    - limited

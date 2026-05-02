@@ -23,8 +23,8 @@ app.include_router(router)
 async def health() -> dict[str, str]:
     return {
         "status": "ok",
-        "groq_configured": "true" if settings.groq_configured else "false",
-        "groq_model": settings.groq_vision_model,
+        "gemini_configured": "true" if settings.gemini_configured else "false",
+        "gemini_model": settings.gemini_vision_model,
         "tesseract_available": "true" if settings.tesseract_available else "false",
         "tesseract_cmd": settings.resolved_tesseract_cmd or "",
     }

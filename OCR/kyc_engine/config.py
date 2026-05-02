@@ -16,13 +16,13 @@ def load_environment() -> None:
 
 
 class Settings(BaseModel):
-    groq_api_key: str = ""
-    groq_vision_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
+    gemini_api_key: str = ""
+    gemini_vision_model: str = "gemini-1.5-pro"
     tesseract_cmd: str = ""
 
     @property
-    def groq_configured(self) -> bool:
-        return bool(self.groq_api_key)
+    def gemini_configured(self) -> bool:
+        return bool(self.gemini_api_key)
 
     @property
     def resolved_tesseract_cmd(self) -> str:
@@ -38,7 +38,7 @@ class Settings(BaseModel):
 
     @property
     def ocr_providers_available(self) -> bool:
-        return self.groq_configured or self.tesseract_available
+        return self.gemini_configured or self.tesseract_available
 
 
 class RulesConfig(BaseModel):
@@ -46,15 +46,17 @@ class RulesConfig(BaseModel):
     fraud_weight: float
     thresholds: dict[str, float]
     penalties: dict[str, int]
+    forensics: dict
+    ocr: dict
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     load_environment()
     return Settings(
-        groq_api_key=getenv("GROQ_API_KEY", "").strip(),
-        groq_vision_model=getenv(
-            "GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct"
+        gemini_api_key=getenv("GEMINI_API_KEY", "").strip(),
+        gemini_vision_model=getenv(
+            "GEMINI_VISION_MODEL", "gemini-1.5-pro"
         ).strip(),
         tesseract_cmd=getenv("TESSERACT_CMD", "").strip(),
     )
